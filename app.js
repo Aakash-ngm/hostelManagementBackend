@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const mongoose = require('mongoose');
 const rateLimit = require('express-rate-limit');
 const errorHandler = require('./middleware/errorHandler');
 
@@ -33,7 +34,19 @@ if (process.env.NODE_ENV === 'development') {
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ success: true, message: 'HostelFlow API is running', timestamp: new Date().toISOString() });
+  const dbStates = {
+    0: 'disconnected',
+    1: 'connected',
+    2: 'connecting',
+    3: 'disconnecting'
+  };
+  const status = dbStates[mongoose.connection.readyState] || 'unknown';
+  res.json({
+    success: true,
+    message: 'HostelFlow API is running',
+    database: status,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Routes
