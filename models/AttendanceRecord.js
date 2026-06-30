@@ -27,7 +27,7 @@ const attendanceRecordSchema = new mongoose.Schema(
     },
     movementType: {
       type: String,
-      enum: ['RegularOuting', 'Permission', 'NativeLeave', 'DinnerBreak', 'EveningOuting'],
+      enum: ['RegularOuting', 'Permission', 'NativeLeave', 'DinnerBreak', 'EveningOuting', 'StaffPermission'],
       required: true,
     },
     reason: {
@@ -52,12 +52,38 @@ const attendanceRecordSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['Out', 'Returned', 'LateReturn', 'Pending'],
+      enum: ['Out', 'Returned', 'LateReturn', 'Pending', 'Returned Early'],
       default: 'Out',
     },
     date: {
       type: String, // YYYY-MM-DD for easy daily queries
       index: true,
+    },
+    // Staff Permission fields
+    staffName: {
+      type: String,
+      default: '',
+    },
+    permissionStartTime: {
+      type: Date,
+      default: null,
+    },
+    permissionEndTime: {
+      type: Date,
+      default: null,
+    },
+    // Early Return fields
+    returnedEarly: {
+      type: Boolean,
+      default: false,
+    },
+    plannedReturnDate: {
+      type: Date,
+      default: null,
+    },
+    actualReturnDate: {
+      type: Date,
+      default: null,
     },
   },
   { timestamps: true }

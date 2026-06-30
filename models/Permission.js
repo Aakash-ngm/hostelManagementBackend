@@ -28,12 +28,25 @@ const permissionSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['Active', 'Expired', 'Returned'],
+      enum: ['Pending', 'Approved', 'Rejected', 'Active', 'Expired', 'Returned'],
       default: 'Active',
     },
     attendanceRecordId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'AttendanceRecord',
+    },
+    // Staff Permission fields
+    staffName: {
+      type: String,
+      default: '',
+    },
+    permissionStartTime: {
+      type: Date,
+      default: null,
+    },
+    permissionEndTime: {
+      type: Date,
+      default: null,
     },
   },
   { timestamps: true }

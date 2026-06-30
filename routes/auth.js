@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { body } = require('express-validator');
-const { registerStudent, loginStudent, registerWarden, loginWarden, getMe } = require('../controllers/authController');
+const { registerStudent, loginStudent, registerWarden, loginWarden, getMe, getWardens, changePassword } = require('../controllers/authController');
 const { protect } = require('../middleware/auth');
 const validate = require('../middleware/validate');
 
@@ -23,7 +23,9 @@ router.post('/student/login', [
   body('password').notEmpty().withMessage('Password is required'),
 ], validate, loginStudent);
 router.post('/warden/register', [
-  body('name').trim().notEmpty().withMessage('Name is required'),
+  body('name').trim().notEmpty().withMessage('Name is required')
+    .custom(val => ['sathish', 'vijayan', 'kannan', 'arul'].includes(val.toLowerCase()))
+    .withMessage('Name must be one of: sathish, vijayan, kannan, arul'),
   body('email').isEmail().withMessage('Valid email is required'),
   body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
 ], validate, registerWarden);
@@ -32,5 +34,11 @@ router.post('/warden/login', [
   body('password').notEmpty().withMessage('Password is required'),
 ], validate, loginWarden);
 router.get('/me', protect, getMe);
+router.get('/wardens', getWardens);
+router.post('/change-password', [
+  protect,
+  body('currentPassword').notEmpty().withMessage('Current password is required'),
+  body('newPassword').isLength({ min: 6 }).withMessage('New password must be at least 6 characters'),
+], validate, changePassword);
 
 module.exports = router;

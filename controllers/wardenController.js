@@ -10,20 +10,40 @@ const { getCurrentISTDate } = require('../utils/timeHelpers');
 exports.getDashboardStats = async (req, res, next) => {
   try {
     const today = getCurrentISTDate();
-    const [totalStudents, inside, outside, permission, nativeLeave, lateToday, todayOut, todayIn, unreadNotifications] = await Promise.all([
+
+    // Get start of week (last 7 days)
+    const startOfWeek = new Date();
+    startOfWeek.setDate(startOfWeek.getDate() - 7);
+    const startOfWeekStr = startOfWeek.toISOString().split('T')[0];
+
+    // Get start of month (last 30 days)
+    const startOfMonth = new Date();
+    startOfMonth.setDate(startOfMonth.getDate() - 30);
+    const startOfMonthStr = startOfMonth.toISOString().split('T')[0];
+
+    const [
+      totalStudents, inside, outside, permission, nativeLeave,
+      lateToday, lateThisWeek, lateThisMonth,
+      todayOut, todayIn, unreadNotifications, notReturned
+    ] = await Promise.all([
       Student.countDocuments({ isActive: true }),
       Student.countDocuments({ currentStatus: 'Inside', isActive: true }),
       Student.countDocuments({ currentStatus: 'Outside', isActive: true }),
       Student.countDocuments({ currentStatus: 'Permission', isActive: true }),
       Student.countDocuments({ currentStatus: 'NativeLeave', isActive: true }),
       AttendanceRecord.countDocuments({ date: today, isLate: true }),
+      AttendanceRecord.countDocuments({ date: { $gte: startOfWeekStr }, isLate: true }),
+      AttendanceRecord.countDocuments({ date: { $gte: startOfMonthStr }, isLate: true }),
       AttendanceRecord.countDocuments({ date: today }),
       AttendanceRecord.countDocuments({ date: today, inTime: { $ne: null } }),
-      Notification.countDocuments({ isRead: false }),
+      Notification.countDocuments({ status: 'unread' }),
+      AttendanceRecord.countDocuments({ status: 'Out' }), // Students Not Returned
     ]);
+
     return sendSuccess(res, {
       totalStudents, inside, outside, permission, nativeLeave,
-      lateToday, todayOut, todayIn, unreadNotifications,
+      lateToday, lateThisWeek, lateThisMonth,
+      todayOut, todayIn, unreadNotifications, notReturned,
       action: 'DASHBOARD_STATS',
     }, 'Dashboard stats fetched');
   } catch (error) {
@@ -83,9 +103,88 @@ exports.addStudent = async (req, res, next) => {
 exports.updateStudent = async (req, res, next) => {
   try {
     const { password, ...updateData } = req.body;
+
+    const currentStudent = await Student.findById(req.params.id);
+    if (!currentStudent) return sendError(res, 'Student not found.', 404);
+
+    // Validate Register Number uniqueness if changed
+    if (updateData.registerNumber && updateData.registerNumber.toUpperCase() !== currentStudent.registerNumber) {
+      const newReg = updateData.registerNumber.toUpperCase();
+      const existing = await Student.findOne({ registerNumber: newReg, _id: { $ne: req.params.id } });
+      if (existing) {
+        return sendError(res, 'Student with this register number already exists.', 400);
+      }
+      updateData.registerNumber = newReg;
+    }
+
+    // Validate Email uniqueness if changed
+    if (updateData.email && updateData.email.toLowerCase() !== currentStudent.email) {
+      const newEmail = updateData.email.toLowerCase();
+      const existingEmail = await Student.findOne({ email: newEmail, _id: { $ne: req.params.id } });
+      if (existingEmail) {
+        return sendError(res, 'Student with this email already exists.', 400);
+      }
+      updateData.email = newEmail;
+    }
+
+    // Update Student
     const student = await Student.findByIdAndUpdate(req.params.id, updateData, { new: true, runValidators: true });
-    if (!student) return sendError(res, 'Student not found.', 404);
-    return sendSuccess(res, { student, action: 'STUDENT_UPDATED' }, 'Student updated successfully');
+
+    // Propagate changes to other collections
+    const attendanceUpdates = {};
+    const permissionUpdates = {};
+    const leaveUpdates = {};
+    const notificationUpdates = {};
+
+    if (updateData.registerNumber && updateData.registerNumber !== currentStudent.registerNumber) {
+      attendanceUpdates.registerNumber = updateData.registerNumber;
+      permissionUpdates.registerNumber = updateData.registerNumber;
+      leaveUpdates.registerNumber = updateData.registerNumber;
+      notificationUpdates.registerNumber = updateData.registerNumber;
+    }
+
+    if (updateData.name && updateData.name !== currentStudent.name) {
+      attendanceUpdates.studentName = updateData.name;
+      permissionUpdates.studentName = updateData.name;
+      leaveUpdates.studentName = updateData.name;
+      notificationUpdates.studentName = updateData.name;
+    }
+
+    if (updateData.department && updateData.department !== currentStudent.department) {
+      attendanceUpdates.department = updateData.department;
+      leaveUpdates.department = updateData.department;
+    }
+
+    if (updateData.year && updateData.year !== currentStudent.year) {
+      attendanceUpdates.year = updateData.year;
+      leaveUpdates.year = updateData.year;
+    }
+
+    if (updateData.roomNumber && updateData.roomNumber !== currentStudent.roomNumber) {
+      attendanceUpdates.roomNumber = updateData.roomNumber;
+      leaveUpdates.roomNumber = updateData.roomNumber;
+    }
+
+    // Perform updates if there is any changed field
+    const updatePromises = [];
+    if (Object.keys(attendanceUpdates).length > 0) {
+      updatePromises.push(AttendanceRecord.updateMany({ studentId: student._id }, { $set: attendanceUpdates }));
+    }
+    if (Object.keys(permissionUpdates).length > 0) {
+      updatePromises.push(Permission.updateMany({ studentId: student._id }, { $set: permissionUpdates }));
+    }
+    if (Object.keys(leaveUpdates).length > 0) {
+      updatePromises.push(NativeLeave.updateMany({ studentId: student._id }, { $set: leaveUpdates }));
+    }
+    if (Object.keys(notificationUpdates).length > 0) {
+      updatePromises.push(Notification.updateMany({ studentId: student._id }, { $set: notificationUpdates }));
+    }
+
+    if (updatePromises.length > 0) {
+      await Promise.all(updatePromises);
+    }
+
+    return sendSuccess(res, { student, action: 'STUDENT_UPDATED' }, 'Student updated successfully and related records synchronized');
   } catch (error) {
     next(error);
   }

@@ -82,3 +82,38 @@ exports.getMe = async (req, res, next) => {
     next(error);
   }
 };
+
+// @route GET /api/auth/wardens
+exports.getWardens = async (req, res, next) => {
+  try {
+    const wardens = await Warden.find({ isActive: true }).select('name email');
+    return sendSuccess(res, { wardens }, 'Wardens fetched successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @route POST /api/auth/change-password
+exports.changePassword = async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    let user;
+
+    if (req.user.role === 'student') {
+      user = await Student.findById(req.user._id).select('+password');
+    } else {
+      user = await Warden.findById(req.user._id).select('+password');
+    }
+
+    if (!user || !(await user.comparePassword(currentPassword))) {
+      return sendError(res, 'Incorrect current password.', 400);
+    }
+
+    user.password = newPassword;
+    await user.save();
+
+    return sendSuccess(res, null, 'Password updated successfully');
+  } catch (error) {
+    next(error);
+  }
+};

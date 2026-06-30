@@ -31,12 +31,34 @@ const nativeLeaveSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['Active', 'Returned', 'Cancelled'],
-      default: 'Active',
+      enum: ['Pending', 'Approved', 'Rejected', 'Active', 'Returned', 'Cancelled', 'Returned Early'],
+      default: 'Pending',
     },
     approvedBy: {
       type: String,
-      default: 'System',
+      default: '',
+    },
+    wardenId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Warden',
+      default: null,
+    },
+    wardenName: {
+      type: String,
+      default: '',
+    },
+    // Early Return fields
+    returnedEarly: {
+      type: Boolean,
+      default: false,
+    },
+    plannedReturnDate: {
+      type: Date,
+      default: null,
+    },
+    actualReturnDate: {
+      type: Date,
+      default: null,
     },
   },
   { timestamps: true }

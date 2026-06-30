@@ -35,7 +35,7 @@ const isLateReturn = (inTime, movementType, permissionUntil = null) => {
   const minutes = inDate.getMinutes();
   const totalMinutes = hours * 60 + minutes;
 
-  if (movementType === 'Permission' && permissionUntil) {
+  if ((movementType === 'Permission' || movementType === 'StaffPermission') && permissionUntil) {
     const permissionTime = new Date(permissionUntil);
     return inDate > permissionTime;
   }
@@ -46,7 +46,7 @@ const isLateReturn = (inTime, movementType, permissionUntil = null) => {
     return totalMinutes > cutoff;
   }
 
-  if (movementType === 'DinnerBreak') {
+  if (movementType === 'DinnerBreak' || movementType === 'DinnerOuting') {
     // Must return by 9:00 PM (21:00)
     const cutoff = 21 * 60;
     return totalMinutes > cutoff;
@@ -63,7 +63,7 @@ const getLateByMinutes = (inTime, movementType, permissionUntil = null) => {
   const minutes = inDate.getMinutes();
   const totalMinutes = hours * 60 + minutes;
 
-  if (movementType === 'Permission' && permissionUntil) {
+  if ((movementType === 'Permission' || movementType === 'StaffPermission') && permissionUntil) {
     const permissionDate = new Date(permissionUntil);
     return Math.floor((inDate - permissionDate) / 60000);
   }
@@ -72,7 +72,7 @@ const getLateByMinutes = (inTime, movementType, permissionUntil = null) => {
     return totalMinutes - (18 * 60 + 30);
   }
 
-  if (movementType === 'DinnerBreak') {
+  if (movementType === 'DinnerBreak' || movementType === 'DinnerOuting') {
     return totalMinutes - 21 * 60;
   }
 

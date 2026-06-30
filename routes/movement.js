@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { body } = require('express-validator');
-const { lookupStudent, recordOut, recordIn, getMyHistory, getStudentHistory } = require('../controllers/movementController');
+const { lookupStudent, recordOut, recordIn, getMyHistory, getStudentHistory, getStudentDashboardStats } = require('../controllers/movementController');
 const { protect } = require('../middleware/auth');
 const { requireWarden } = require('../middleware/roleGuard');
 const validate = require('../middleware/validate');
@@ -15,5 +15,6 @@ router.post('/in', [
 ], validate, recordIn);
 router.get('/history', protect, getMyHistory);
 router.get('/history/:registerNumber', protect, requireWarden, getStudentHistory);
+router.get('/student/stats', protect, getStudentDashboardStats);
 
 module.exports = router;

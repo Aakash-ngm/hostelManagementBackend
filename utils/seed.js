@@ -19,6 +19,7 @@ const seed = async () => {
 
   // Create sample students
   const students = [
+    { name: 'Abinash', registerNumber: '311523205001', email: 'abinash@student.com', password: 'Student@123', department: 'CSE', year: '3rd Year', roomNumber: 'A-105', studentPhone: '9876543210', parentPhone: '9876543211' },
     { name: 'Arjun Kumar', registerNumber: 'CS2021001', email: 'arjun@student.com', password: 'Student@123', department: 'CSE', year: '3rd Year', roomNumber: 'A-101', studentPhone: '9876543210', parentPhone: '9876543211' },
     { name: 'Priya Sharma', registerNumber: 'EC2021002', email: 'priya@student.com', password: 'Student@123', department: 'ECE', year: '3rd Year', roomNumber: 'A-102', studentPhone: '9876543220', parentPhone: '9876543221' },
     { name: 'Rahul Singh', registerNumber: 'ME2021003', email: 'rahul@student.com', password: 'Student@123', department: 'MECH', year: '2nd Year', roomNumber: 'B-201', studentPhone: '9876543230', parentPhone: '9876543231' },
@@ -27,7 +28,7 @@ const seed = async () => {
   ];
 
   for (const s of students) {
-    const exists = await Student.findOne({ registerNumber: s.registerNumber });
+    const exists = await Student.findOne({ $or: [{ registerNumber: s.registerNumber }, { email: s.email }] });
     if (!exists) await Student.create(s);
   }
   console.log('✅ Sample students created');

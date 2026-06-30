@@ -78,32 +78,122 @@ exports.getMonthlyReport = async (req, res, next) => {
 exports.exportExcel = async (req, res, next) => {
   try {
     const { type, date, year, month } = req.query;
-    let records = [];
+    let dataRows = [];
     let filename = 'hostelflow_report';
 
-    if (type === 'daily') {
-      const d = date || getCurrentISTDate();
-      records = await AttendanceRecord.find({ date: d }).sort({ outTime: -1 });
-      filename = `daily_report_${d}`;
-    } else if (type === 'weekly') {
-      const today = new Date();
-      const days = [];
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date(today);
-        d.setDate(today.getDate() - i);
-        days.push(d.toISOString().split('T')[0]);
-      }
-      records = await getReportData(days[0], days[days.length - 1]);
-      filename = `weekly_report_${days[0]}_to_${days[days.length - 1]}`;
-    } else if (type === 'monthly') {
-      const y = year || new Date().getFullYear();
-      const m = month || (new Date().getMonth() + 1);
-      const startDate = `${y}-${String(m).padStart(2, '0')}-01`;
-      const endDate = new Date(y, m, 0).toISOString().split('T')[0];
-      records = await getReportData(startDate, endDate);
-      filename = `monthly_report_${y}_${m}`;
+    const Permission = require('../models/Permission');
+    const NativeLeave = require('../models/NativeLeave');
+
+    if (type === 'permission') {
+      const perms = await Permission.find().sort({ createdAt: -1 });
+      dataRows = perms.map(p => ({
+        registerNumber: p.registerNumber,
+        studentName: p.studentName,
+        department: '',
+        year: '',
+        outTime: p.startTime,
+        inTime: p.status === 'Returned' ? p.updatedAt : null,
+        permissionStartTime: p.permissionStartTime || p.startTime,
+        permissionEndTime: p.permissionEndTime || p.permissionUntil,
+        staffName: p.staffName || '',
+        durationMinutes: p.status === 'Returned' ? Math.floor((p.updatedAt - p.startTime) / 60000) : 0,
+        lateByMinutes: p.status === 'Expired' ? Math.floor((new Date() - p.permissionUntil) / 60000) : 0,
+        status: p.status === 'Returned' ? 'On Time' : (p.status === 'Expired' ? 'Late' : 'Permission')
+      }));
+      filename = `permission_report_${getCurrentISTDate()}`;
+    } else if (type === 'nativeleave' || type === 'leave') {
+      const leaves = await NativeLeave.find().sort({ createdAt: -1 });
+      dataRows = leaves.map(l => ({
+        registerNumber: l.registerNumber,
+        studentName: l.studentName,
+        department: l.department || '',
+        year: l.year || '',
+        outTime: l.fromDate,
+        inTime: l.actualReturnDate || null,
+        permissionStartTime: null,
+        permissionEndTime: null,
+        staffName: '',
+        durationMinutes: l.actualReturnDate ? Math.floor((l.actualReturnDate - l.fromDate) / 60000) : 0,
+        lateByMinutes: 0,
+        status: l.returnedEarly ? 'Returned Early' : (l.status === 'Active' ? 'Native Leave' : 'On Time')
+      }));
+      filename = `native_leave_report_${getCurrentISTDate()}`;
+    } else if (type === 'emergency') {
+      const EmergencyPermission = require('../models/EmergencyPermission');
+      const emers = await EmergencyPermission.find().sort({ createdAt: -1 });
+      dataRows = emers.map(e => ({
+        registerNumber: e.registerNumber,
+        studentName: e.studentName,
+        department: e.department || '',
+        year: e.year || '',
+        outTime: e.outTime,
+        inTime: null,
+        permissionStartTime: null,
+        permissionEndTime: null,
+        staffName: e.wardenName || '',
+        durationMinutes: 0,
+        lateByMinutes: 0,
+        status: `Emergency (${e.wardenDecision})`
+      }));
+      filename = `emergency_permission_report_${getCurrentISTDate()}`;
     } else {
-      return sendError(res, 'Invalid report type. Use daily, weekly, or monthly.', 400);
+      let records = [];
+      if (type === 'daily') {
+        const d = date || getCurrentISTDate();
+        records = await AttendanceRecord.find({ date: d }).sort({ outTime: -1 });
+        filename = `daily_report_${d}`;
+      } else if (type === 'weekly') {
+        const today = new Date();
+        const days = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(today);
+          d.setDate(today.getDate() - i);
+          days.push(d.toISOString().split('T')[0]);
+        }
+        records = await getReportData(days[0], days[days.length - 1]);
+        filename = `weekly_report_${days[0]}_to_${days[days.length - 1]}`;
+      } else if (type === 'monthly') {
+        const y = year || new Date().getFullYear();
+        const m = month || (new Date().getMonth() + 1);
+        const startDate = `${y}-${String(m).padStart(2, '0')}-01`;
+        const endDate = new Date(y, m, 0).toISOString().split('T')[0];
+        records = await getReportData(startDate, endDate);
+        filename = `monthly_report_${y}_${m}`;
+      } else if (type === 'latecomer' || type === 'late') {
+        records = await AttendanceRecord.find({ isLate: true }).sort({ outTime: -1 });
+        filename = `late_comer_report_${getCurrentISTDate()}`;
+      } else {
+        records = await AttendanceRecord.find().sort({ outTime: -1 });
+        filename = `attendance_report_${getCurrentISTDate()}`;
+      }
+
+      dataRows = records.map(r => {
+        let statusStr = 'On Time';
+        if (r.movementType === 'NativeLeave') {
+          statusStr = r.returnedEarly ? 'Returned Early' : (r.status === 'Out' ? 'Native Leave' : 'On Time');
+        } else if (r.movementType === 'StaffPermission' || r.movementType === 'Permission') {
+          statusStr = r.status === 'Out' ? 'Permission' : (r.isLate ? 'Late' : 'On Time');
+        } else if (r.movementType === 'EmergencyPermission') {
+          statusStr = r.status === 'Out' ? 'Emergency' : (r.isLate ? 'Late' : 'On Time');
+        } else {
+          statusStr = r.isLate ? 'Late' : (r.status === 'Out' ? 'Out' : 'On Time');
+        }
+
+        return {
+          registerNumber: r.registerNumber,
+          studentName: r.studentName,
+          department: r.department || '',
+          year: r.year || '',
+          outTime: r.outTime,
+          inTime: r.inTime,
+          permissionStartTime: r.permissionStartTime || (r.movementType === 'StaffPermission' || r.movementType === 'Permission' || r.movementType === 'EmergencyPermission' ? r.outTime : null),
+          permissionEndTime: r.permissionEndTime || r.permissionUntil,
+          staffName: r.staffName || '',
+          durationMinutes: r.durationMinutes || 0,
+          lateByMinutes: r.lateByMinutes || 0,
+          status: statusStr
+        };
+      });
     }
 
     const workbook = new ExcelJS.Workbook();
@@ -114,7 +204,6 @@ exports.exportExcel = async (req, res, next) => {
       pageSetup: { paperSize: 9, orientation: 'landscape' },
     });
 
-    // Header styling
     sheet.mergeCells('A1:L1');
     sheet.getCell('A1').value = 'HostelFlow – Hostel Attendance Report';
     sheet.getCell('A1').font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' } };
@@ -123,15 +212,15 @@ exports.exportExcel = async (req, res, next) => {
     sheet.getRow(1).height = 35;
 
     sheet.mergeCells('A2:L2');
-    sheet.getCell('A2').value = `Report Type: ${type.toUpperCase()} | Generated: ${new Date().toLocaleString('en-IN')}`;
+    sheet.getCell('A2').value = `Report Type: ${type ? type.toUpperCase() : 'ALL'} | Generated: ${new Date().toLocaleString('en-IN')}`;
     sheet.getCell('A2').font = { italic: true, size: 10 };
     sheet.getCell('A2').alignment = { horizontal: 'center' };
     sheet.getRow(2).height = 20;
 
-    // Column headers
     const headers = [
-      'S.No', 'Register No.', 'Student Name', 'Department', 'Year', 'Room No.',
-      'Movement Type', 'Out Time', 'In Time', 'Duration', 'Status', 'Late By'
+      'Register Number', 'Student Name', 'Department', 'Year',
+      'Out Time', 'In Time', 'Permission Start Time', 'Permission End Time',
+      'Staff Name', 'Duration Outside', 'Late Minutes', 'Status'
     ];
     const headerRow = sheet.addRow(headers);
     headerRow.height = 22;
@@ -142,33 +231,32 @@ exports.exportExcel = async (req, res, next) => {
       cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
     });
 
-    // Column widths
     sheet.columns = [
-      { width: 6 }, { width: 16 }, { width: 22 }, { width: 18 }, { width: 10 },
-      { width: 10 }, { width: 16 }, { width: 20 }, { width: 20 }, { width: 12 }, { width: 12 }, { width: 10 }
+      { width: 16 }, { width: 22 }, { width: 18 }, { width: 10 },
+      { width: 20 }, { width: 20 }, { width: 20 }, { width: 20 },
+      { width: 18 }, { width: 18 }, { width: 12 }, { width: 16 }
     ];
 
-    // Data rows
-    records.forEach((r, i) => {
+    dataRows.forEach((r, i) => {
       const row = sheet.addRow([
-        i + 1,
         r.registerNumber,
         r.studentName,
-        r.department || '',
-        r.year || '',
-        r.roomNumber || '',
-        r.movementType,
+        r.department,
+        r.year,
         r.outTime ? new Date(r.outTime).toLocaleString('en-IN') : '',
         r.inTime ? new Date(r.inTime).toLocaleString('en-IN') : 'Not Returned',
-        r.durationMinutes ? formatDuration(r.durationMinutes) : '-',
-        r.isLate ? 'LATE' : r.status,
-        r.isLate ? `${r.lateByMinutes} mins` : '-',
+        r.permissionStartTime ? new Date(r.permissionStartTime).toLocaleString('en-IN') : '-',
+        r.permissionEndTime ? new Date(r.permissionEndTime).toLocaleString('en-IN') : '-',
+        r.staffName || '-',
+        r.durationMinutes ? `${r.durationMinutes} mins` : '-',
+        r.lateByMinutes ? `${r.lateByMinutes} mins` : '0',
+        r.status
       ]);
       row.eachCell(cell => {
         cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
       });
-      if (r.isLate) {
+      if (r.status === 'Late') {
         row.getCell(11).font = { bold: true, color: { argb: 'FFDC2626' } };
         row.getCell(12).font = { bold: true, color: { argb: 'FFDC2626' } };
       }
@@ -179,10 +267,9 @@ exports.exportExcel = async (req, res, next) => {
       }
     });
 
-    // Summary row
-    const lateCount = records.filter(r => r.isLate).length;
     sheet.addRow([]);
-    const summaryRow = sheet.addRow(['', '', '', '', '', '', 'TOTAL:', records.length, '', '', 'LATE:', lateCount]);
+    const lateCount = dataRows.filter(r => r.status === 'Late').length;
+    const summaryRow = sheet.addRow(['', '', '', '', '', '', 'TOTAL:', dataRows.length, '', '', 'LATE:', lateCount]);
     summaryRow.eachCell(cell => { cell.font = { bold: true }; });
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
