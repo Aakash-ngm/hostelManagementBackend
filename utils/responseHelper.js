@@ -1,4 +1,7 @@
 const sendSuccess = (res, data = {}, message = 'Success', statusCode = 200, alerts = []) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   return res.status(statusCode).json({
     success: true,
     action: data.action || '',

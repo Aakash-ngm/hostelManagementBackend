@@ -8,6 +8,16 @@ const requireWarden = (req, res, next) => {
   next();
 };
 
+const requireWardenOrAdminMess = (req, res, next) => {
+  if (req.userRole !== 'warden' && req.userRole !== 'admin-mess') {
+    return res.status(403).json({
+      success: false,
+      message: 'Access denied. Warden or Admin (Mess) only.',
+    });
+  }
+  next();
+};
+
 const requireStudent = (req, res, next) => {
   if (req.userRole !== 'student') {
     return res.status(403).json({
@@ -18,4 +28,4 @@ const requireStudent = (req, res, next) => {
   next();
 };
 
-module.exports = { requireWarden, requireStudent };
+module.exports = { requireWarden, requireWardenOrAdminMess, requireStudent };

@@ -3,6 +3,80 @@ const Student = require('../models/Student');
 const { sendSuccess, sendError } = require('../utils/responseHelper');
 const { getCurrentISTDate, formatDuration } = require('../utils/timeHelpers');
 const ExcelJS = require('exceljs');
+const Permission = require('../models/Permission');
+const NativeLeave = require('../models/NativeLeave');
+const EmergencyPermission = require('../models/EmergencyPermission');
+
+const getMealCountsForDate = async (targetDate) => {
+  const targetDayStart = new Date(targetDate);
+  targetDayStart.setHours(0, 0, 0, 0);
+  const targetDayEnd = new Date(targetDate);
+  targetDayEnd.setHours(23, 59, 59, 999);
+
+  const leavesOnDay = await NativeLeave.find({
+    status: { $in: ['Approved', 'Active'] },
+    fromDate: { $lte: targetDayEnd },
+    toDate: { $gte: targetDayStart }
+  });
+  const excludedLeaveStudentIds = leavesOnDay.map(l => l.studentId.toString());
+
+  const permissionsOnDay = await Permission.find({
+    status: { $in: ['Approved', 'Active'] },
+    permissionStartTime: { $gte: targetDayStart, $lte: targetDayEnd }
+  });
+
+  const breakfastStart = 7 * 60;
+  const breakfastEnd = 8 * 60 + 30;
+  const lunchStart = 12 * 60 + 30;
+  const lunchEnd = 14 * 60;
+  const dinnerStart = 20 * 60;
+  const dinnerEnd = 21 * 60;
+
+  const breakfastExcludedPermissions = [];
+  const lunchExcludedPermissions = [];
+  const dinnerExcludedPermissions = [];
+
+  permissionsOnDay.forEach(p => {
+    const startObj = new Date(p.permissionStartTime);
+    const endObj = new Date(p.permissionEndTime);
+    const startMin = startObj.getHours() * 60 + startObj.getMinutes();
+    const endMin = endObj.getHours() * 60 + endObj.getMinutes();
+
+    if (startMin <= breakfastEnd && endMin >= breakfastStart) {
+      breakfastExcludedPermissions.push(p.studentId.toString());
+    }
+    if (startMin <= lunchEnd && endMin >= lunchStart) {
+      lunchExcludedPermissions.push(p.studentId.toString());
+    }
+    if (startMin <= dinnerEnd && endMin >= dinnerStart) {
+      dinnerExcludedPermissions.push(p.studentId.toString());
+    }
+  });
+
+  const emergenciesOnDay = await EmergencyPermission.find({
+    wardenDecision: 'Approved',
+    outTime: { $gte: targetDayStart, $lte: targetDayEnd }
+  });
+  const emergencyExcludedStudentIds = emergenciesOnDay.map(e => e.studentId ? e.studentId.toString() : '');
+
+  const allStudents = await Student.find({ isActive: true });
+
+  let breakfastCount = 0;
+  let lunchCount = 0;
+  let dinnerCount = 0;
+
+  allStudents.forEach(student => {
+    const idStr = student._id.toString();
+    if (excludedLeaveStudentIds.includes(idStr)) return;
+    if (emergencyExcludedStudentIds.includes(idStr)) return;
+
+    if (!breakfastExcludedPermissions.includes(idStr)) breakfastCount++;
+    if (!lunchExcludedPermissions.includes(idStr)) lunchCount++;
+    if (!dinnerExcludedPermissions.includes(idStr)) dinnerCount++;
+  });
+
+  return { breakfastCount, lunchCount, dinnerCount };
+};
 
 const getReportData = async (startDate, endDate) => {
   const records = await AttendanceRecord.find({
@@ -15,6 +89,111 @@ const getReportData = async (startDate, endDate) => {
 exports.getDailyReport = async (req, res, next) => {
   try {
     const date = req.query.date || getCurrentISTDate();
+
+    if (req.userRole === 'admin-mess') {
+      const targetDayStart = new Date(date);
+      targetDayStart.setHours(0, 0, 0, 0);
+      const targetDayEnd = new Date(date);
+      targetDayEnd.setHours(23, 59, 59, 999);
+
+      // Excluded leaves: any student with an active/approved native leave on target date
+      const leavesOnDay = await NativeLeave.find({
+        status: { $in: ['Approved', 'Active'] },
+        fromDate: { $lte: targetDayEnd },
+        toDate: { $gte: targetDayStart }
+      });
+      const excludedLeaveStudentIds = leavesOnDay.map(l => l.studentId.toString());
+
+      // Excluded permissions: approved staff permissions on target date overlapping meal times
+      const permissionsOnDay = await Permission.find({
+        status: { $in: ['Approved', 'Active'] },
+        permissionStartTime: { $gte: targetDayStart, $lte: targetDayEnd }
+      });
+
+      const breakfastStart = 7 * 60;
+      const breakfastEnd = 8 * 60 + 30;
+      const lunchStart = 12 * 60 + 30;
+      const lunchEnd = 14 * 60;
+      const dinnerStart = 20 * 60;
+      const dinnerEnd = 21 * 60;
+
+      const breakfastExcludedPermissions = [];
+      const lunchExcludedPermissions = [];
+      const dinnerExcludedPermissions = [];
+
+      permissionsOnDay.forEach(p => {
+        const startObj = new Date(p.permissionStartTime);
+        const endObj = new Date(p.permissionEndTime);
+        const startMin = startObj.getHours() * 60 + startObj.getMinutes();
+        const endMin = endObj.getHours() * 60 + endObj.getMinutes();
+
+        if (startMin <= breakfastEnd && endMin >= breakfastStart) {
+          breakfastExcludedPermissions.push(p.studentId.toString());
+        }
+        if (startMin <= lunchEnd && endMin >= lunchStart) {
+          lunchExcludedPermissions.push(p.studentId.toString());
+        }
+        if (startMin <= dinnerEnd && endMin >= dinnerStart) {
+          dinnerExcludedPermissions.push(p.studentId.toString());
+        }
+      });
+
+      // Excluded emergencies: active emergency permissions on target date
+      const emergenciesOnDay = await EmergencyPermission.find({
+        wardenDecision: 'Approved',
+        outTime: { $gte: targetDayStart, $lte: targetDayEnd }
+      });
+      const emergencyExcludedStudentIds = emergenciesOnDay.map(e => e.studentId ? e.studentId.toString() : '');
+
+      const allStudents = await Student.find({ isActive: true }).sort({ name: 1 });
+
+      const records = allStudents.map(student => {
+        const idStr = student._id.toString();
+        const isOnLeave = excludedLeaveStudentIds.includes(idStr);
+        const isEmergencyOut = emergencyExcludedStudentIds.includes(idStr);
+
+        const isBreakfastEx = isOnLeave || isEmergencyOut || breakfastExcludedPermissions.includes(idStr);
+        const isLunchEx = isOnLeave || isEmergencyOut || lunchExcludedPermissions.includes(idStr);
+        const isDinnerEx = isOnLeave || isEmergencyOut || dinnerExcludedPermissions.includes(idStr);
+
+        return {
+          _id: student._id,
+          registerNumber: student.registerNumber,
+          studentName: student.name,
+          roomNumber: student.roomNumber,
+          status: student.currentStatus,
+          breakfast: isBreakfastEx ? 'Excluded' : 'Included',
+          lunch: isLunchEx ? 'Excluded' : 'Included',
+          dinner: isDinnerEx ? 'Excluded' : 'Included'
+        };
+      });
+
+      const breakfastCount = records.filter(r => r.breakfast === 'Included').length;
+      const lunchCount = records.filter(r => r.lunch === 'Included').length;
+      const dinnerCount = records.filter(r => r.dinner === 'Included').length;
+      const insideCount = allStudents.filter(s => s.currentStatus === 'Inside').length;
+      const outsideCount = allStudents.filter(s => s.currentStatus === 'Outside').length;
+      const leaveCount = allStudents.filter(s => s.currentStatus === 'NativeLeave').length;
+      const permCount = allStudents.filter(s => s.currentStatus === 'Permission').length;
+
+      const attendanceRecords = await AttendanceRecord.find({ date }).sort({ outTime: -1 });
+
+      return sendSuccess(res, {
+        records: attendanceRecords,
+        mealAllocation: records,
+        stats: {
+          breakfastCount,
+          lunchCount,
+          dinnerCount,
+          nativeLeaveCount: leaveCount,
+          permissionCount: permCount,
+          studentsInside: insideCount,
+          studentsOutside: outsideCount
+        },
+        date
+      }, 'Daily summary report fetched');
+    }
+
     const records = await AttendanceRecord.find({ date }).sort({ outTime: -1 });
     const stats = {
       total: records.length,
@@ -40,6 +219,31 @@ exports.getWeeklyReport = async (req, res, next) => {
     }
     const startDate = days[0];
     const endDate = days[days.length - 1];
+
+    if (req.userRole === 'admin-mess') {
+      const dailyStats = [];
+      for (const day of days) {
+        const mealStats = await getMealCountsForDate(new Date(day));
+        const insideCount = await Student.countDocuments({ currentStatus: 'Inside', isActive: true });
+        const outsideCount = await Student.countDocuments({ currentStatus: 'Outside', isActive: true });
+        const leaveCount = await Student.countDocuments({ currentStatus: 'NativeLeave', isActive: true });
+        const permCount = await Student.countDocuments({ currentStatus: 'Permission', isActive: true });
+
+        dailyStats.push({
+          date: day,
+          breakfastCount: mealStats.breakfastCount,
+          lunchCount: mealStats.lunchCount,
+          dinnerCount: mealStats.dinnerCount,
+          nativeLeaveCount: leaveCount,
+          permissionCount: permCount,
+          studentsInside: insideCount,
+          studentsOutside: outsideCount
+        });
+      }
+      const records = await getReportData(startDate, endDate);
+      return sendSuccess(res, { records, dailyStats, dateRange: { startDate, endDate } }, 'Weekly summary report fetched');
+    }
+
     const records = await getReportData(startDate, endDate);
     const dailyStats = days.map(day => ({
       date: day,
@@ -61,6 +265,34 @@ exports.getMonthlyReport = async (req, res, next) => {
     const month = req.query.month || (today.getMonth() + 1);
     const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
     const endDate = new Date(year, month, 0).toISOString().split('T')[0];
+
+    if (req.userRole === 'admin-mess') {
+      const dailyStats = [];
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const dayStr = d.toISOString().split('T')[0];
+        const mealStats = await getMealCountsForDate(new Date(d));
+        const insideCount = await Student.countDocuments({ currentStatus: 'Inside', isActive: true });
+        const outsideCount = await Student.countDocuments({ currentStatus: 'Outside', isActive: true });
+        const leaveCount = await Student.countDocuments({ currentStatus: 'NativeLeave', isActive: true });
+        const permCount = await Student.countDocuments({ currentStatus: 'Permission', isActive: true });
+
+        dailyStats.push({
+          date: dayStr,
+          breakfastCount: mealStats.breakfastCount,
+          lunchCount: mealStats.lunchCount,
+          dinnerCount: mealStats.dinnerCount,
+          nativeLeaveCount: leaveCount,
+          permissionCount: permCount,
+          studentsInside: insideCount,
+          studentsOutside: outsideCount
+        });
+      }
+      const records = await getReportData(startDate, endDate);
+      return sendSuccess(res, { records, dailyStats, dateRange: { startDate, endDate } }, 'Monthly summary report fetched');
+    }
+
     const records = await getReportData(startDate, endDate);
     const stats = {
       total: records.length,
@@ -80,6 +312,122 @@ exports.exportExcel = async (req, res, next) => {
     const { type, date, year, month } = req.query;
     let dataRows = [];
     let filename = 'hostelflow_report';
+
+    if (req.userRole === 'admin-mess') {
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = 'HostelFlow Mess System';
+      workbook.created = new Date();
+
+      const sheet = workbook.addWorksheet('Mess Attendance Report');
+
+      sheet.mergeCells('A1:G1');
+      sheet.getCell('A1').value = 'HostelFlow – Mess Attendance & Planning Summary';
+      sheet.getCell('A1').font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
+      sheet.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF10B981' } };
+      sheet.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' };
+      sheet.getRow(1).height = 35;
+
+      sheet.mergeCells('A2:G2');
+      sheet.getCell('A2').value = `Generated: ${new Date().toLocaleString('en-IN')}`;
+      sheet.getCell('A2').font = { italic: true, size: 10 };
+      sheet.getCell('A2').alignment = { horizontal: 'center' };
+      sheet.getRow(2).height = 20;
+
+      const headers = [
+        'Date / Period', 'Breakfast Count', 'Lunch Count', 'Dinner Count',
+        'Students Inside', 'Students Outside', 'Native Leave Count'
+      ];
+      const headerRow = sheet.addRow(headers);
+      headerRow.height = 22;
+      headerRow.eachCell(cell => {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF047857' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      });
+
+      let statsList = [];
+      const queryDate = date || getCurrentISTDate();
+
+      if (type === 'daily' || !type) {
+        const mealStats = await getMealCountsForDate(new Date(queryDate));
+        const insideCount = await Student.countDocuments({ currentStatus: 'Inside', isActive: true });
+        const outsideCount = await Student.countDocuments({ currentStatus: 'Outside', isActive: true });
+        const leaveCount = await Student.countDocuments({ currentStatus: 'NativeLeave', isActive: true });
+        
+        statsList.push([
+          queryDate,
+          mealStats.breakfastCount,
+          mealStats.lunchCount,
+          mealStats.dinnerCount,
+          insideCount,
+          outsideCount,
+          leaveCount
+        ]);
+      } else if (type === 'weekly') {
+        const today = new Date();
+        const days = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(today);
+          d.setDate(today.getDate() - i);
+          days.push(d.toISOString().split('T')[0]);
+        }
+        for (const day of days) {
+          const mealStats = await getMealCountsForDate(new Date(day));
+          const insideCount = await Student.countDocuments({ currentStatus: 'Inside', isActive: true });
+          const outsideCount = await Student.countDocuments({ currentStatus: 'Outside', isActive: true });
+          const leaveCount = await Student.countDocuments({ currentStatus: 'NativeLeave', isActive: true });
+          statsList.push([
+            day,
+            mealStats.breakfastCount,
+            mealStats.lunchCount,
+            mealStats.dinnerCount,
+            insideCount,
+            outsideCount,
+            leaveCount
+          ]);
+        }
+      } else if (type === 'monthly') {
+        const today = new Date();
+        const qYear = year || today.getFullYear();
+        const qMonth = month || (today.getMonth() + 1);
+        const startDateStr = `${qYear}-${String(qMonth).padStart(2, '0')}-01`;
+        const endDateStr = new Date(qYear, qMonth, 0).toISOString().split('T')[0];
+
+        const start = new Date(startDateStr);
+        const end = new Date(endDateStr);
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          const dayStr = d.toISOString().split('T')[0];
+          const mealStats = await getMealCountsForDate(new Date(d));
+          const insideCount = await Student.countDocuments({ currentStatus: 'Inside', isActive: true });
+          const outsideCount = await Student.countDocuments({ currentStatus: 'Outside', isActive: true });
+          const leaveCount = await Student.countDocuments({ currentStatus: 'NativeLeave', isActive: true });
+          statsList.push([
+            dayStr,
+            mealStats.breakfastCount,
+            mealStats.lunchCount,
+            mealStats.dinnerCount,
+            insideCount,
+            outsideCount,
+            leaveCount
+          ]);
+        }
+      }
+
+      statsList.forEach(row => {
+        sheet.addRow(row);
+      });
+
+      sheet.columns.forEach(col => {
+        col.width = 18;
+        col.alignment = { horizontal: 'center' };
+      });
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename=mess_summary_${getCurrentISTDate()}.xlsx`);
+
+      await workbook.xlsx.write(res);
+      return res.end();
+    }
 
     const Permission = require('../models/Permission');
     const NativeLeave = require('../models/NativeLeave');

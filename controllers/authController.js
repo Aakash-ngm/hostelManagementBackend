@@ -36,6 +36,9 @@ exports.loginStudent = async (req, res, next) => {
     if (!student || !(await student.comparePassword(password))) {
       return sendError(res, 'Invalid register number or password.', 401);
     }
+    if (!student.isActive) {
+      return sendError(res, 'Your account has been deactivated. Please contact the Warden.', 403);
+    }
     const token = generateToken(student._id, 'student');
     return sendSuccess(res, { token, user: { id: student._id, name: student.name, registerNumber: student.registerNumber, email: student.email, department: student.department, year: student.year, roomNumber: student.roomNumber, currentStatus: student.currentStatus, role: 'student' } }, 'Login successful');
   } catch (error) {
@@ -67,8 +70,8 @@ exports.loginWarden = async (req, res, next) => {
     if (!warden || !(await warden.comparePassword(password))) {
       return sendError(res, 'Invalid email or password.', 401);
     }
-    const token = generateToken(warden._id, 'warden');
-    return sendSuccess(res, { token, user: { id: warden._id, name: warden.name, email: warden.email, role: 'warden' } }, 'Login successful');
+    const token = generateToken(warden._id, warden.role || 'warden');
+    return sendSuccess(res, { token, user: { id: warden._id, name: warden.name, email: warden.email, role: warden.role || 'warden' } }, 'Login successful');
   } catch (error) {
     next(error);
   }

@@ -22,13 +22,6 @@ router.post('/student/login', [
   body('registerNumber').notEmpty().withMessage('Register number is required'),
   body('password').notEmpty().withMessage('Password is required'),
 ], validate, loginStudent);
-router.post('/warden/register', [
-  body('name').trim().notEmpty().withMessage('Name is required')
-    .custom(val => ['sathish', 'vijayan', 'kannan', 'arul'].includes(val.toLowerCase()))
-    .withMessage('Name must be one of: sathish, vijayan, kannan, arul'),
-  body('email').isEmail().withMessage('Valid email is required'),
-  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
-], validate, registerWarden);
 router.post('/warden/login', [
   body('email').isEmail().withMessage('Valid email is required'),
   body('password').notEmpty().withMessage('Password is required'),

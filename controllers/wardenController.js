@@ -3,8 +3,84 @@ const AttendanceRecord = require('../models/AttendanceRecord');
 const Permission = require('../models/Permission');
 const NativeLeave = require('../models/NativeLeave');
 const Notification = require('../models/Notification');
+const EmergencyPermission = require('../models/EmergencyPermission');
 const { sendSuccess, sendError } = require('../utils/responseHelper');
 const { getCurrentISTDate } = require('../utils/timeHelpers');
+
+// Helper to calculate meal counts based on overlaps
+const getMealCountsForDate = async (targetDate) => {
+  const targetDayStart = new Date(targetDate);
+  targetDayStart.setHours(0, 0, 0, 0);
+  const targetDayEnd = new Date(targetDate);
+  targetDayEnd.setHours(23, 59, 59, 999);
+
+  // Excluded leaves: any student with an active/approved native leave on targetDate
+  const leavesOnDay = await NativeLeave.find({
+    status: { $in: ['Approved', 'Active'] },
+    fromDate: { $lte: targetDayEnd },
+    toDate: { $gte: targetDayStart }
+  });
+  const excludedLeaveStudentIds = leavesOnDay.map(l => l.studentId.toString());
+
+  // Excluded permissions: approved staff permissions on targetDate overlapping meal times
+  const permissionsOnDay = await Permission.find({
+    status: { $in: ['Approved', 'Active'] },
+    permissionStartTime: { $gte: targetDayStart, $lte: targetDayEnd }
+  });
+
+  const breakfastStart = 7 * 60;     // 07:00
+  const breakfastEnd = 8 * 60 + 30;  // 08:30
+  const lunchStart = 12 * 60 + 30;   // 12:30
+  const lunchEnd = 14 * 60;          // 14:00
+  const dinnerStart = 20 * 60;       // 20:00
+  const dinnerEnd = 21 * 60;         // 21:00
+
+  const breakfastExcludedPermissions = [];
+  const lunchExcludedPermissions = [];
+  const dinnerExcludedPermissions = [];
+
+  permissionsOnDay.forEach(p => {
+    const startObj = new Date(p.permissionStartTime);
+    const endObj = new Date(p.permissionEndTime);
+    const startMin = startObj.getHours() * 60 + startObj.getMinutes();
+    const endMin = endObj.getHours() * 60 + endObj.getMinutes();
+
+    if (startMin <= breakfastEnd && endMin >= breakfastStart) {
+      breakfastExcludedPermissions.push(p.studentId.toString());
+    }
+    if (startMin <= lunchEnd && endMin >= lunchStart) {
+      lunchExcludedPermissions.push(p.studentId.toString());
+    }
+    if (startMin <= dinnerEnd && endMin >= dinnerStart) {
+      dinnerExcludedPermissions.push(p.studentId.toString());
+    }
+  });
+
+  // Excluded emergencies: active emergency permissions on targetDate
+  const emergenciesOnDay = await EmergencyPermission.find({
+    wardenDecision: 'Approved',
+    outTime: { $gte: targetDayStart, $lte: targetDayEnd }
+  });
+  const emergencyExcludedStudentIds = emergenciesOnDay.map(e => e.studentId ? e.studentId.toString() : '');
+
+  const allStudents = await Student.find({ isActive: true });
+
+  let breakfastCount = 0;
+  let lunchCount = 0;
+  let dinnerCount = 0;
+
+  allStudents.forEach(student => {
+    const idStr = student._id.toString();
+    if (excludedLeaveStudentIds.includes(idStr)) return;
+    if (emergencyExcludedStudentIds.includes(idStr)) return;
+
+    if (!breakfastExcludedPermissions.includes(idStr)) breakfastCount++;
+    if (!lunchExcludedPermissions.includes(idStr)) lunchCount++;
+    if (!dinnerExcludedPermissions.includes(idStr)) dinnerCount++;
+  });
+
+  return { breakfastCount, lunchCount, dinnerCount };
+};
 
 // @route GET /api/warden/dashboard
 exports.getDashboardStats = async (req, res, next) => {
@@ -24,7 +100,8 @@ exports.getDashboardStats = async (req, res, next) => {
     const [
       totalStudents, inside, outside, permission, nativeLeave,
       lateToday, lateThisWeek, lateThisMonth,
-      todayOut, todayIn, unreadNotifications, notReturned
+      todayOut, todayIn, unreadNotifications, notReturned,
+      emergencyPermission
     ] = await Promise.all([
       Student.countDocuments({ isActive: true }),
       Student.countDocuments({ currentStatus: 'Inside', isActive: true }),
@@ -38,12 +115,34 @@ exports.getDashboardStats = async (req, res, next) => {
       AttendanceRecord.countDocuments({ date: today, inTime: { $ne: null } }),
       Notification.countDocuments({ status: 'unread' }),
       AttendanceRecord.countDocuments({ status: 'Out' }), // Students Not Returned
+      EmergencyPermission.countDocuments({ wardenDecision: 'Approved', outTime: { $ne: null }, inTime: null })
     ]);
 
+    const todayMealStats = await getMealCountsForDate(new Date());
+    const tomorrowObj = new Date();
+    tomorrowObj.setDate(tomorrowObj.getDate() + 1);
+    const tomorrowMealStats = await getMealCountsForDate(tomorrowObj);
+
     return sendSuccess(res, {
-      totalStudents, inside, outside, permission, nativeLeave,
-      lateToday, lateThisWeek, lateThisMonth,
-      todayOut, todayIn, unreadNotifications, notReturned,
+      totalStudents,
+      inside,
+      outside,
+      permission,
+      nativeLeave,
+      emergencyPermission,
+      lateToday,
+      lateThisWeek,
+      lateThisMonth,
+      todayOut,
+      todayIn,
+      unreadNotifications,
+      notReturned,
+      breakfastCount: todayMealStats.breakfastCount,
+      lunchCount: todayMealStats.lunchCount,
+      dinnerCount: todayMealStats.dinnerCount,
+      tomorrowBreakfast: tomorrowMealStats.breakfastCount,
+      tomorrowLunch: tomorrowMealStats.lunchCount,
+      tomorrowDinner: tomorrowMealStats.dinnerCount,
       action: 'DASHBOARD_STATS',
     }, 'Dashboard stats fetched');
   } catch (error) {

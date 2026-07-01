@@ -12,7 +12,7 @@ const { formatDateDDMMMYYYY } = require('../utils/timeFormatters');
 // @route GET /api/movement/lookup/:registerNumber
 exports.lookupStudent = async (req, res, next) => {
   try {
-    const student = await Student.findOne({ registerNumber: req.params.registerNumber.toUpperCase() });
+    const student = await Student.findOne({ registerNumber: req.params.registerNumber.toUpperCase(), isActive: true });
     if (!student) return sendError(res, 'Student not found. Check register number.', 404);
 
     const activeLeave = await NativeLeave.findOne({

@@ -17,13 +17,13 @@ const protect = async (req, res, next) => {
     req.userId = decoded.id;
     req.userRole = decoded.role;
 
-    if (decoded.role === 'warden') {
+    if (decoded.role === 'warden' || decoded.role === 'admin-mess') {
       const warden = await Warden.findById(decoded.id);
       if (!warden) return res.status(401).json({ success: false, message: 'User not found.' });
       req.user = warden;
     } else {
       const student = await Student.findById(decoded.id);
-      if (!student) return res.status(401).json({ success: false, message: 'User not found.' });
+      if (!student || !student.isActive) return res.status(401).json({ success: false, message: 'User account is deactivated or deleted.' });
       req.user = student;
     }
 
