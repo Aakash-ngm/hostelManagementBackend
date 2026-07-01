@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const mongoose = require('mongoose');
 const rateLimit = require('express-rate-limit');
+const mongoSanitize = require('express-mongo-sanitize');
 const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
@@ -23,9 +24,19 @@ const limiter = rateLimit({
 });
 app.use('/api', limiter);
 
+// Stricter rate limiting for authentication endpoints
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 15,
+  message: { success: false, message: 'Too many authentication attempts, please try again after 15 minutes.' },
+});
+app.use('/api/auth/student/login', authLimiter);
+app.use('/api/auth/warden/login', authLimiter);
+
 // Body parser
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true }));
+app.use(mongoSanitize());
 
 // Logger (dev only)
 if (process.env.NODE_ENV === 'development') {
