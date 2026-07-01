@@ -12,7 +12,11 @@ app.listen(PORT, () => {
   console.log(`🔗 API: http://localhost:${PORT}/api/health`);
   
   // Connect to MongoDB in the background
-  connectDB().then(() => {
+  connectDB().then(async () => {
+    // Perform auto-seeding if database is blank
+    const autoSeed = require('./utils/autoSeeder');
+    await autoSeed();
+
     // Run dynamic checks immediately, then every 30 seconds
     runDynamicChecks().catch(err => console.error('Error in initial checks:', err));
     setInterval(() => {
