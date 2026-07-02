@@ -9,13 +9,23 @@ const seed = async () => {
   // Clear existing data
   await Warden.deleteMany({});
 
-  // Create default warden
+  // Create default admin mess
   await Warden.create({
-    name: 'Admin Warden',
+    name: 'Admin Mess',
     email: 'admin@hostelflow.com',
     password: 'Admin@123',
+    role: 'admin-mess'
   });
-  console.log('✅ Default warden created: admin@hostelflow.com / Admin@123');
+  console.log('✅ Default admin-mess created: admin@hostelflow.com / Admin@123');
+
+  // Create default warden
+  await Warden.create({
+    name: 'Warden Office',
+    email: 'warden@hostelflow.com',
+    password: 'Warden@123',
+    role: 'warden'
+  });
+  console.log('✅ Default warden created: warden@hostelflow.com / Warden@123');
 
   // Create sample students
   const students = [

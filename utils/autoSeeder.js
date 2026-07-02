@@ -16,15 +16,15 @@ const autoSeed = async () => {
     }
 
     // 2. Check and seed Regular Warden
-    const sathishExists = await Warden.findOne({ email: 'sathish@gmail.com' });
-    if (!sathishExists) {
+    const wardenExists = await Warden.findOne({ email: 'warden@hostelflow.com' });
+    if (!wardenExists) {
       await Warden.create({
-        name: 'Sathish Warden',
-        email: 'sathish@gmail.com',
+        name: 'Warden Office',
+        email: 'warden@hostelflow.com',
         password: 'Warden@123',
         role: 'warden'
       });
-      console.log('✅ Auto-Seeded default warden: sathish@gmail.com / Warden@123');
+      console.log('✅ Auto-Seeded default warden: warden@hostelflow.com / Warden@123');
     }
 
     // 3. Check and seed Sample Students
